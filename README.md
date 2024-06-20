@@ -4,7 +4,7 @@
 
 <h1 align="center">Unity Doorstop</h1>
 
-[![GitHub Workflow Status](https://img.shields.io/github/workflow/status/NeighTools/UnityDoorstop/Build)](https://github.com/NeighTools/UnityDoorstop/actions/workflows/build-be.yml)
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/NeighTools/UnityDoorstop/build-be.yml?branch=master)](https://github.com/NeighTools/UnityDoorstop/actions/workflows/build-be.yml)
 [![nightly.link artifacts](https://img.shields.io/badge/Artifacts-nightly.link-blueviolet)](https://nightly.link/NeighTools/UnityDoorstop/workflows/build-be/master)
 
 ***
@@ -90,11 +90,8 @@ Doorstop sets some environment variables useful for code execution:
 ### Debugging
 
 Doorstop 4 supports debugging the assemblies in the runtime.
-At the moment, debugging is somewhat limited depending on the runtime.
 
 #### Debugging in UnityMono
-
-At the moment, debugging is supported in Unity 2017+ games.
 
 To enable debugging, set `debug_enabled` to `true` and optionally change the debug server address via `debug_address` (see [configuration options](#doorstop-configuration)).  
 After launching the game, you may connect to the debugger using the server address (default is `127.0.0.1:10000`).  
@@ -134,10 +131,11 @@ All Doorstop arguments start with `--doorstop-` and always contain an argument. 
 * `string` = any sequence of characters and numbers. Wrap into `"`s if the string contains spaces
 
 | Argument                                          | Description                                                                                          |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| ------------------------------------------------- |------------------------------------------------------------------------------------------------------|
 | `--doorstop-enabled bool`                         | Enable or disable Doorstop.                                                                          |
 | `--doorstop-redirect-output-log bool`             | *Only on Windows*: If `true` Unity's output log is redirected to `<current folder>\output_log.txt`   |
 | `--doorstop-target-assembly string`               | Path to the assembly to load and execute.                                                            |
+| `--doorstop-boot-config-override string`          | Overrides the boot.config file path.                                                                 |
 | `--doorstop-mono-dll-search-path-override string` | Overrides default Mono DLL search path                                                               |
 | `--doorstop-mono-debug-enabled bool`              | If true, Mono debugger server will be enabled                                                        |
 | `--doorstop-mono-debug-suspend bool`              | Whether to suspend the game execution until the debugger is attached.                                |

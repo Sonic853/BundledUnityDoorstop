@@ -10,6 +10,7 @@
 #include "util/resource.h"
 
 bool_t mono_debug_init_called = FALSE;
+bool_t mono_is_net35 = FALSE;
 
 void mono_doorstop_bootstrap(void *mono_domain) {
     if (getenv(TEXT("DOORSTOP_INITIALIZED"))) {
@@ -126,8 +127,12 @@ void mono_doorstop_bootstrap(void *mono_domain) {
         LOG("Error invoking code!");
         if (mono.object_to_string) {
             void *str = mono.object_to_string(exc, NULL);
-            char *exc_str = mono.string_to_utf8(str);
+            char *exc_str_n = mono.string_to_utf8(str);
+            char_t *exc_str = widen(exc_str_n);
             LOG("Error message: %s", exc_str);
+            LOG("\n");
+            free(exc_str);
+            mono.free(exc_str_n);
         }
     }
     LOG("Done");
@@ -137,8 +142,15 @@ void mono_doorstop_bootstrap(void *mono_domain) {
 
 void *init_mono(const char *root_domain_name, const char *runtime_version) {
     char_t *root_domain_name_w = widen(root_domain_name);
+    char_t *runtime_version_w = widen(runtime_version);
     LOG("Starting mono domain \"%s\"", root_domain_name_w);
+    LOG("Runtime version: %s", runtime_version_w);
+    if (strlen(runtime_version_w) > 2 &&
+        (runtime_version_w[1] == L'2' || runtime_version_w[1] == L'1')) {
+        mono_is_net35 = TRUE;
+    }
     free(root_domain_name_w);
+    free(runtime_version_w);
     char *root_dir_n = mono.assembly_getrootdir();
     char_t *root_dir = widen(root_dir_n);
     LOG("Current root: %s", root_dir);
@@ -146,27 +158,65 @@ void *init_mono(const char *root_domain_name, const char *runtime_version) {
     LOG("Overriding mono DLL search path");
 
     size_t mono_search_path_len = strlen(root_dir) + 1;
-    char_t *target_path_full = get_full_path(config.target_assembly);
-    char_t *target_path_folder = get_folder_name(target_path_full);
-    mono_search_path_len += strlen(target_path_folder) + 1;
-    LOG("Adding %s to mono search path", target_path_folder);
 
     char_t *override_dir_full = NULL;
-    bool_t has_override = config.mono_dll_search_path_override &&
-                          strlen(config.mono_dll_search_path_override);
+    char_t *config_path_value = config.mono_dll_search_path_override;
+    bool_t has_override = config_path_value && strlen(config_path_value);
     if (has_override) {
-        override_dir_full = get_full_path(config.mono_dll_search_path_override);
+        size_t path_start = 0;
+        override_dir_full = calloc(MAX_PATH, sizeof(char_t));
+        memset(override_dir_full, 0, MAX_PATH * sizeof(char_t));
+
+        bool_t found_path = FALSE;
+        for (size_t i = 0; i <= strlen(config_path_value); i++) {
+            char_t current_char = config_path_value[i];
+            if (current_char == *PATH_SEP || current_char == 0) {
+                if (i <= path_start) {
+                    path_start++;
+                    continue;
+                }
+
+                size_t path_len = i - path_start;
+                char_t *path = calloc(path_len + 1, sizeof(char_t));
+                strncpy(path, config_path_value + path_start, path_len);
+                path[path_len] = 0;
+
+                char_t *full_path = get_full_path(path);
+
+                if (strlen(override_dir_full) + strlen(full_path) + 2 >
+                    MAX_PATH) {
+                    LOG("Ignoring this root path because its absolute version "
+                        "is too long: %s",
+                        full_path);
+                    free(path);
+                    free(full_path);
+                    path_start = i + 1;
+                    continue;
+                }
+
+                if (found_path) {
+                    strcat(override_dir_full, PATH_SEP);
+                }
+
+                strcat(override_dir_full, full_path);
+                LOG("Adding root path: %s", full_path);
+
+                free(path);
+                free(full_path);
+
+                found_path = TRUE;
+                path_start = i + 1;
+            }
+        }
+
         mono_search_path_len += strlen(override_dir_full) + 1;
-        LOG("Adding root path: %s", override_dir_full);
     }
 
     char_t *mono_search_path = calloc(mono_search_path_len + 1, sizeof(char_t));
-    if (has_override) {
+    if (override_dir_full && strlen(override_dir_full)) {
         strcat(mono_search_path, override_dir_full);
         strcat(mono_search_path, PATH_SEP);
     }
-    strcat(mono_search_path, target_path_folder);
-    strcat(mono_search_path, PATH_SEP);
     strcat(mono_search_path, root_dir);
 
     LOG("Mono search path: %s", mono_search_path);
@@ -178,22 +228,34 @@ void *init_mono(const char *root_domain_name, const char *runtime_version) {
     if (override_dir_full) {
         free(override_dir_full);
     }
-    free(target_path_full);
-    free(target_path_folder);
 
     hook_mono_jit_parse_options(0, NULL);
-
-    void *domain = mono.jit_init_version(root_domain_name, runtime_version);
 
     bool_t debugger_already_enabled = mono_debug_init_called;
     if (mono.debug_enabled) {
         debugger_already_enabled |= mono.debug_enabled();
     }
 
-    if (config.mono_debug_enabled && !debugger_already_enabled) {
-        LOG("Detected mono debugger is not initialized; initialized it");
-        mono.debug_init(MONO_DEBUG_FORMAT_MONO);
-        mono.debug_domain_create(domain);
+    void *domain = NULL;
+    if (mono_is_net35) {
+        if (config.mono_debug_enabled && !debugger_already_enabled) {
+            LOG("Detected mono debugger is not initialized; initialized it");
+            mono.debug_init(MONO_DEBUG_FORMAT_MONO);
+        }
+
+        domain = mono.jit_init_version(root_domain_name, runtime_version);
+
+        if (config.mono_debug_enabled && !debugger_already_enabled) {
+            mono.debug_domain_create(domain);
+        }
+    } else {
+        domain = mono.jit_init_version(root_domain_name, runtime_version);
+
+        if (config.mono_debug_enabled && !debugger_already_enabled) {
+            LOG("Detected mono debugger is not initialized; initialized it");
+            mono.debug_init(MONO_DEBUG_FORMAT_MONO);
+            mono.debug_domain_create(domain);
+        }
     }
 
     mono_doorstop_bootstrap(domain);
@@ -239,14 +301,14 @@ void il2cpp_doorstop_bootstrap() {
     strcat(app_paths_env, config.clr_corlib_dir);
     strcat(app_paths_env, PATH_SEP);
     strcat(app_paths_env, target_dir);
-    char *app_paths_env_n = narrow(app_paths_env);
+    const char *app_paths_env_n = narrow(app_paths_env);
 
     LOG("App path: %s", app_path);
     LOG("Target dir: %s", target_dir);
     LOG("Target name: %s", target_name);
     LOG("APP_PATHS: %s", app_paths_env);
 
-    char *props = "APP_PATHS";
+    const char *props = "APP_PATHS";
 
     setenv(TEXT("DOORSTOP_INITIALIZED"), TEXT("TRUE"), TRUE);
     setenv(TEXT("DOORSTOP_INVOKE_DLL_PATH"), config.target_assembly, TRUE);
@@ -265,7 +327,8 @@ void il2cpp_doorstop_bootstrap() {
 
     void (*startup)() = NULL;
     result = coreclr.create_delegate(host, domain_id, target_name_n,
-                                     "Doorstop.Entrypoint", "Start", &startup);
+                                     "Doorstop.Entrypoint", "Start",
+                                     (void **)&startup);
     if (result != 0) {
         LOG("Failed to get entrypoint delegate: 0x%08x", result);
         return;
@@ -286,8 +349,8 @@ int init_il2cpp(const char *domain_name) {
 
 #define MONO_DEBUG_ARG_START                                                   \
     TEXT("--debugger-agent=transport=dt_socket,server=y,address=")
-// TODO: For .NET 3.5 monos, need to use defer=y instead
 #define MONO_DEBUG_NO_SUSPEND TEXT(",suspend=n")
+#define MONO_DEBUG_NO_SUSPEND_NET35 TEXT(",suspend=n,defer=y")
 
 void hook_mono_jit_parse_options(int argc, char **argv) {
     char_t *debug_options = getenv(TEXT("DNSPY_UNITY_DBG2"));
@@ -305,7 +368,11 @@ void hook_mono_jit_parse_options(int argc, char **argv) {
         size_t debug_args_len =
             STR_LEN(MONO_DEBUG_ARG_START) + strlen(config.mono_debug_address);
         if (!config.mono_debug_suspend) {
-            debug_args_len += STR_LEN(MONO_DEBUG_NO_SUSPEND);
+            if (mono_is_net35) {
+                debug_args_len += STR_LEN(MONO_DEBUG_NO_SUSPEND_NET35);
+            } else {
+                debug_args_len += STR_LEN(MONO_DEBUG_NO_SUSPEND);
+            }
         }
 
         if (!debug_options) {
@@ -313,7 +380,11 @@ void hook_mono_jit_parse_options(int argc, char **argv) {
             strcat(debug_options, MONO_DEBUG_ARG_START);
             strcat(debug_options, config.mono_debug_address);
             if (!config.mono_debug_suspend) {
-                strcat(debug_options, MONO_DEBUG_NO_SUSPEND);
+                if (mono_is_net35) {
+                    strcat(debug_options, MONO_DEBUG_NO_SUSPEND_NET35);
+                } else {
+                    strcat(debug_options, MONO_DEBUG_NO_SUSPEND);
+                }
             }
         }
 

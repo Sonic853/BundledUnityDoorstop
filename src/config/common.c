@@ -12,6 +12,7 @@ void cleanup_config() {
 
 #ifndef BUNDLE
     FREE_NON_NULL(config.target_assembly);
+    FREE_NON_NULL(config.boot_config_override);
     FREE_NON_NULL(config.mono_dll_search_path_override);
     FREE_NON_NULL(config.clr_corlib_dir);
     FREE_NON_NULL(config.clr_runtime_coreclr_path);
@@ -29,6 +30,7 @@ void init_config_defaults() {
     config.mono_debug_suspend = FALSE;
     config.mono_debug_address = NULL;
     config.target_assembly = NULL;
+    config.boot_config_override = NULL;
     config.mono_dll_search_path_override = NULL;
     config.clr_corlib_dir = NULL;
     config.clr_runtime_coreclr_path = NULL;
